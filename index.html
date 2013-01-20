@@ -1,0 +1,207 @@
+<html>
+<head>
+<style>
+.shell {
+    background: #000;
+    color: #eee;
+    font: 1.00em Inconsolata, Consolas, 'Courier New', monospace;
+    height: 400px;
+    line-height: 1.150em;
+    position: relative;
+    width: 500px;
+}
+
+.shell * {
+    color: #eee;
+    font: 1.00em Inconsolata, Consolas, 'Courier New', monospace;
+}
+
+.shell .input {
+    background: transparent;
+    border: 0;
+    bottom: 0;
+    display: block;
+    line-height: 1.150em;
+    margin: 0;
+    position: absolute;
+    word-wrap: break-word;
+    width: 100%;
+}
+.shell .input:focus { outline: none; }
+
+.shell .scrollback {
+    background: rgba(255,0,0,0.1);
+    overflow: hidden;
+    padding: 0;
+    padding-bottom: 0.20em;
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+}
+.shell .scrollback li {
+    list-style: none;
+    word-wrap: break-word;
+    width: 100%;
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+    <ol class="scrollback"></ol>
+    <input type="text" class="input" data-prompt="$ ">
+</div>
+
+<script src="http://code.jquery.com/jquery.min.js"></script>
+<script src="./node_modules/todo.txt/todotxt.js"></script>
+
+<script src="terminal.js"></script>
+<script> 
+    "use strict";
+
+    $(document).ready(function() {
+        // Define and set PS1 (text before prompt)
+        var PS1 = $('.shell .input').data('prompt') || '> ';
+        $('.shell .input').val(PS1);
+        
+        // Setup the new terminal
+        var term = new Terminal();
+        
+        // Register a low-priority "unknown command" helper
+        term.register("input", function(result, terminal) {
+            terminal.output("Unknown command: " + result.input);
+        }, /^(.*)$/, -1000);
+        
+        // Register input and output handlers to update the scrollback list
+        // These are high priority (executed early) and do not return a result > 0
+        // so that other callbacks can handle the input/output.
+        term.register("input", function(result, terminal) {
+            $('.shell .scrollback').append($('<li>').text(PS1 + result.input));
+        }, null, 1000);
+        term.register("output", function(result, terminal) {
+            console.log(result);
+            $('.shell .scrollback').append($('<li>').html(result.input.replace("\n", "<br>")));
+        }, null, 1000);
+        
+        // Register a simple echo command
+        term.register("input", function(result, terminal) {
+            if (result[2] !== undefined) {
+                terminal.output(result[2]);
+            } else {
+                terminal.output("Usage: echo <text>");
+            }
+            
+            return 1; // Prevent further callback execution
+        }, /^echo( (.+))?$/);
+        
+        // date
+        term.register("input", function(result, terminal) {
+            terminal.output(new Date().toUTCString());
+            return 1;
+        }, /^date$/);
+        
+        /**
+         * TodoTxt
+         */
+        var todoList = new todotxt.TodoList();
+        // Match t, todo and todo.sh
+        term.register("input", function(result, terminal) {
+            console.log(result);
+            
+            if (result[2] !== undefined) {
+                var commands = {
+                    "add": /^(add|a)( (.+))?$/,
+                    "list": /^(list|ls)$/,
+                    "do": /^do ([0-9]+)$/
+                };
+                
+                for (var cmd in commands) {
+                    var match = commands[cmd].exec(result[3]);
+                    if (match) {
+                        switch (cmd) {
+                            case "add":
+                                var task = match[3]
+                                if (task.substring(0, 1) == '"' && task.substring(-1, 1) == '"') {
+                                    task = task.substring(1, task.length-1);
+                                }
+                                task = todoList.add(task);
+                                term.output("Add: " + task.toString());
+                                break;
+                            case "list":
+                                var tasks = todoList.list();
+                                for (var task in tasks) {
+                                    term.output(tasks[task].id + ': ' + tasks[task].toString());
+                                }
+                                term.output('--');
+                                term.output('TODO: ' + tasks.length + ' tasks in ' + todoList.source() + '.');
+                                break;
+                            case "do":
+                                task = todoList.findById(match[1]);
+                                if (task) {
+                                    task.complete();
+                                    term.output('TODO: ' + task.toString());
+                                } else {
+                                    term.output('TODO: Task not found.');
+                                }
+                                break;
+                        }
+                    }
+                }
+            } else {
+                terminal.output("Usage: " + result[1] + " <cmd>");
+            }
+            
+            return 1;
+        }, /^(t|todo|todo\.sh)( (.+))?$/);
+        
+        
+        
+        
+        // Add input to terminal on enter press
+        $('.shell .input').keyup(function(evt) {
+            if (evt.keyCode == 13) {
+                var input = $(this).val();
+                if (input.indexOf(PS1) === 0) {
+                    input = input.substring(PS1.length);
+                }
+            
+                term.input(input);
+                $(this).val(PS1);
+            }
+        });
+        
+        // Prevent moving the caret behind PS1
+        $('.shell .input').keydown(function(evt) {
+            if (evt.keyCode == 8 || evt.keyCode == 37) {
+                // Backspace or left keys pressed
+                // If caret position is behind length of PS1, cancel it
+                if (evt.target.selectionStart <= PS1.length) {
+                    evt.preventDefault();
+                    
+                    
+                }
+            }
+        });
+        
+        // Prevent mouse-selection of PS1
+        // Todo: prevent dragging of selected text behind PS1 (perhaps in onchange)
+        $('.shell .input').select(function(evt) {
+            if (evt.target.selectionStart <= PS1.length) {
+                evt.target.selectionStart = PS1.length;
+                evt.preventDefault();
+            }
+        });
+        
+        // Output some leader lines
+        term.output("todo.txt-cli demo");
+        term.output("An attempt to emulate <a href='https://github.com/ginatrapani/todo.txt-cli'>todo.txt-cli</a> in JavaScript");
+        term.output("--");
+        term.output('Try: t add "Get some milk"');
+        $('.shell .input').focus();
+        $('.shell').click(function (evt) {
+            $('.shell .input').focus();
+        });
+    });
+</script>
+</body>
+</html>
